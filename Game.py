@@ -11,6 +11,8 @@ from panda3d.core import Vec3
 from panda3d.core import Vec4
 from panda3d.core import WindowProperties
 
+from GameObject import *
+
 
 class Game(ShowBase):
     def __init__(self):
@@ -23,10 +25,6 @@ class Game(ShowBase):
 
         self.environment = loader.loadModel("Models/Misc/environment")
         self.environment.reparentTo(render)
-
-        self.tempActor = Actor("Models/PandaChan/act_p3d_chan", {"walk": "Models/PandaChan/a_p3d_chan_run"})
-        self.tempActor.reparentTo(render)
-        self.tempActor.loop("walk")
 
         self.camera.setPos(0,0,32)
         self.camera.setP(-90)
@@ -45,15 +43,13 @@ class Game(ShowBase):
 
         self.cTrav = CollisionTraverser()
         self.pusher = CollisionHandlerPusher()
-
         self.pusher.setHorizontal(True)
+        self.pusher.add_in_pattern("%fn-into-%in")
 
-        colliderNode = CollisionNode("player")
-        colliderNode.addSolid(CollisionSphere(0, 0, 0, 0.3))
-        collider = self.tempActor.attachNewNode(colliderNode)
-
-        base.pusher.addCollider(collider, self.tempActor)
-        base.cTrav.addCollider(collider, self.pusher)
+        self.accept("trapEnemy-into-wall", self.stopTrap)
+        self.accept("trapEnemy-into-trapEnemy", self.stopTrap)
+        self.accept("trapEnemy-into-player", self.trapHitsSomething)
+        self.accept("trapEnemy-into-walkingEnemy", self.trapHitsSomething)
 
         wallSolid = CollisionTube(-8.0, 0, 0, 8.0, 0, 0, 0.2)
         wallNode = CollisionNode("wall")
@@ -100,25 +96,48 @@ class Game(ShowBase):
 
         self.updateTask = taskMgr.add(self.update, "update")
 
+        self.player = Player()
+        self.tempEnemy = WalkingEnemy(Vec3(5, 0, 0))
+        self.tempTrap = TrapEnemy(Vec3(-2, 7, 0))
+
     def updateKeyMap(self, controlName, controlState):
         self.keyMap[controlName] = controlState
 
     def update(self, task):
         # Get time since last update
         dt = globalClock.getDt()
-
-        if self.keyMap["up"]:
-            self.tempActor.setPos(self.tempActor.getPos() + Vec3(0,5.0*dt,0))
-        if self.keyMap["down"]:
-            self.tempActor.setPos(self.tempActor.getPos() + Vec3(0,-5.0*dt, 0))
-        if self.keyMap["left"]:
-            self.tempActor.setPos(self.tempActor.getPos() + Vec3(-5.0*dt,0,0))
-        if self.keyMap["right"]:
-            self.tempActor.setPos(self.tempActor.getPos() + Vec3(5.0*dt,0,0))
-        if self.keyMap["shoot"]:
-            print("Zap")
+        self.player.update(self.keyMap, dt)
+        self.tempEnemy.update(self.player, dt)
+        self.tempTrap.update(self.player, dt)
 
         return task.cont
+
+    def stopTrap(self, entry):
+        collider = entry.getFromNodePath()
+        if collider.hasPythonTag("owner"):
+            trap = collider.getPythonTag("owner")
+            trap.moveDirection = 0
+            trap.ignorePlayer = False
+
+    def trapHitsSomething(self, entry):
+        collider = entry.getFromNodePath()
+        if collider.hasPythonTag("owner"):
+            trap = collider.getPythonTag("owner")
+
+            # We don't want stationary traps to do damage,
+            # so ignore the collision if the "moveDirection" is 0
+            if trap.moveDirection == 0:
+                return
+
+            collider = entry.getIntoNodePath()
+            if collider.hasPythonTag("owner"):
+                obj = collider.getPythonTag("owner")
+                if isinstance(obj, Player):
+                    if not trap.ignorePlayer:
+                        obj.alterHealth(-1)
+                        trap.ignorePlayer = True
+                else:
+                    obj.alterHealth(-10)
 
 game = Game()
 game.run()
