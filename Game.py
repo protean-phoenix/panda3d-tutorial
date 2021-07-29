@@ -1,13 +1,9 @@
 from direct.showbase.ShowBase import ShowBase
-from direct.actor.Actor import Actor
 from panda3d.core import AmbientLight
 from panda3d.core import CollisionHandlerPusher
-from panda3d.core import CollisionNode
-from panda3d.core import CollisionSphere
 from panda3d.core import CollisionTraverser
 from panda3d.core import CollisionTube
 from panda3d.core import DirectionalLight
-from panda3d.core import Vec3
 from panda3d.core import Vec4
 from panda3d.core import WindowProperties
 

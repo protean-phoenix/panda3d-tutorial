@@ -1,8 +1,12 @@
 import math
 
+from panda3d.core import BitMask32
 from panda3d.core import Vec3, Vec2
 from direct.actor.Actor import Actor
-from panda3d.core import CollisionSphere, CollisionNode
+from panda3d.core import CollisionHandlerQueue
+from panda3d.core import CollisionNode
+from panda3d.core import CollisionRay
+from panda3d.core import CollisionSphere
 
 FRICTION = 150.0
 
@@ -102,7 +106,55 @@ class Player(GameObject):
         base.pusher.addCollider(self.collider, self.actor)
         base.cTrav.addCollider(self.collider, base.pusher)
 
+        # BitMasks for Collision
+        mask = BitMask32()
+        mask.setBit(1)
+        self.collider.node().setIntoCollideMask(mask)
+        mask = BitMask32()
+        mask.setBit(1)
+        self.collider.node().setFromCollideMask(mask)
+
+        # Begin animation
         self.actor.loop("stand")
+
+        # Setup Laser
+        self.ray = CollisionRay(0, 0, 0, 0, 1, 0)
+
+        rayNode = CollisionNode("playerRay")
+        rayNode.addSolid(self.ray)
+
+        self.rayNodePath = render.attachNewNode(rayNode)
+        self.rayQueue = CollisionHandlerQueue()
+
+        # We want this ray to collide with things, so
+        # tell our traverser about it. However, note that,
+        # unlike with "CollisionHandlerPusher", we don't
+        # have to tell our "CollisionHandlerQueue" about it.
+        base.cTrav.addCollider(self.rayNodePath, self.rayQueue)
+        mask = BitMask32()
+
+        # Note that we set a different bit here!
+        # This means that the ray's mask and
+        # the collider's mask don't match, and
+        # so the ray won't collide with the
+        # collider.
+        mask.setBit(2)
+        rayNode.setFromCollideMask(mask)
+
+        mask = BitMask32()
+        rayNode.setIntoCollideMask(mask)
+
+        self.damagePerSecond = -5.0
+
+        # A nice laser-beam model to show our laser
+        self.beamModel = loader.loadModel("Models/Misc/bambooLaser")
+        self.beamModel.reparentTo(self.actor)
+        self.beamModel.setZ(1.5)
+        # This prevents lights from affecting this particular node
+        self.beamModel.setLightOff()
+        # We don't start out firing the laser, so
+        # we have it initially hidden.
+        self.beamModel.hide()
 
     def update(self, keys, dt):
         GameObject.update(self, dt)
@@ -124,6 +176,36 @@ class Player(GameObject):
             self.walking = True
             self.velocity.addX(self.acceleration*dt)
 
+        # If we're pressing the "shoot" button, check
+        # whether the ray has hit anything, and if so,
+        # examine the collision-entry for the first hit.
+        # If the thing hit has an "owner" Python-tag, then
+        # it's a GameObject, and should try to take damage--
+        # with the exception if "TrapEnemies",
+        # which are invulnerable.
+        if keys["shoot"]:
+            if self.rayQueue.getNumEntries() > 0:
+                self.rayQueue.sortEntries()
+                rayHit = self.rayQueue.getEntry(0)
+                hitPos = rayHit.getSurfacePoint(render)
+
+                hitNodePath = rayHit.getIntoNodePath()
+                print(hitNodePath)
+                if hitNodePath.hasPythonTag("owner"):
+                    hitObject = hitNodePath.getPythonTag("owner")
+                    if not isinstance(hitObject, TrapEnemy):
+                        hitObject.alterHealth(self.damagePerSecond * dt)
+
+                # Find out how long the beam is, and scale the
+                # beam-model accordingly.
+                beamLength = (hitPos - self.actor.getPos()).length()
+                self.beamModel.setSy(beamLength)
+
+                self.beamModel.show()
+        else:
+            # If we're not shooting, don't show the beam-model.
+            self.beamModel.hide()
+
         # Run the appropriate animation for our current state.
         # See the text below this for an explanation
         if self.walking:
@@ -139,6 +221,11 @@ class Player(GameObject):
             if not standControl.isPlaying():
                 self.actor.stop("walk")
                 self.actor.loop("stand")
+
+    def cleanup(self):
+        base.cTrav.removeCollider(self.rayNodePath)
+
+        GameObject.cleanup(self)
 
 
 class Enemy(GameObject):
@@ -203,6 +290,12 @@ class WalkingEnemy(Enemy):
         # the y-direction, we use the y-axis.
         self.yVector = Vec2(0, 1)
 
+        # Note that this is the same bit as we used for the ray!
+        mask = BitMask32()
+        mask.setBit(2)
+
+        self.collider.node().setIntoCollideMask(mask)
+
     def runLogic(self, player, dt):
         # In short: find the vector between
         # this enemy and the player.
@@ -254,6 +347,20 @@ class TrapEnemy(Enemy):
         # This will allow us to prevent multiple
         # collisions with the player during movement
         self.ignorePlayer = False
+
+        # Trap-enemies should hit both the player and "walking" enemies,
+        # so we set _both_ bits here!
+        mask = BitMask32()
+        mask.setBit(2)
+        mask.setBit(1)
+
+        self.collider.node().setIntoCollideMask(mask)
+
+        mask = BitMask32()
+        mask.setBit(2)
+        mask.setBit(1)
+
+        self.collider.node().setFromCollideMask(mask)
 
     def runLogic(self, player, dt):
         if self.moveDirection != 0:
